@@ -125,7 +125,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reward scales
     rewards = {
         "progress_goal_reward_scale": 2.17,
-        "center_gate_reward_scale": 0.18,
+        "center_gate_reward_scale": 0.2,
         "gate_pass_reward_scale": 70.0,
         "vel_forward_reward_scale": 0.07,
         "stuck_penalty_reward_scale": -1.0,
@@ -133,8 +133,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         "time_penalty_reward_scale": -0.02,
         "death_cost": -15.0,
         "reverse_gate_penalty_reward_scale": -1.0,
-        "wrong_side_toward_gate_penalty_reward_scale": -3.0,
+        "wrong_side_toward_gate_penalty_reward_scale": -8.0,
     }
+
+    # this is good for actual flight!
+    # rewards = {
+    #     "progress_goal_reward_scale": 2.17,
+    #     "center_gate_reward_scale": 0.2,
+    #     "gate_pass_reward_scale": 70.0,
+    #     "vel_forward_reward_scale": 0.07,
+    #     "stuck_penalty_reward_scale": -1.0,
+    #     "crash_reward_scale": -10.0,
+    #     "time_penalty_reward_scale": -0.02,
+    #     "death_cost": -15.0,
+    #     "reverse_gate_penalty_reward_scale": -1.0,
+    #     "wrong_side_toward_gate_penalty_reward_scale": -8.0,
+    # }
 
     # rewards = {
     #     "progress_goal_reward_scale": 2.2,

@@ -76,12 +76,12 @@ class DefaultQuadcopterStrategy:
         """Randomize thrust-to-weight ratio.
 
         PDF range:
-            twr in [0.95, 1.05] * nominal_twr
+            twr in [0.9, 1.1] * nominal_twr
         """
         if env_ids is None or len(env_ids) == 0:
             return
 
-        twr_scale = torch.empty(len(env_ids), device=self.device).uniform_(0.95, 1.05)
+        twr_scale = torch.empty(len(env_ids), device=self.device).uniform_(0.88, 1.09)
         self.env._thrust_to_weight[env_ids] = self.env._twr_value * twr_scale
 
     def _randomize_aero(self, env_ids: torch.Tensor):
@@ -247,33 +247,37 @@ class DefaultQuadcopterStrategy:
             gate_rot_mat.transpose(1, 2), drone_lin_vel_w.unsqueeze(-1)
         ).squeeze(-1)
 
+        # Original code already defines this sign convention:
+        # vel_forward > 0  <=> moving in the desired forward pass direction
         vel_forward = -drone_lin_vel_gate[:, 0]
 
         # ------------------------------------------------------------------
         # Gate traversal logic
-        # Match controller_simple_policy.py:
-        # forward pass:
-        #   norm(pose_gate) < gate_side
-        #   -0.1 < x < 0
-        #   |y| < gate_side / 2
-        #   |z| < gate_side / 2
-        #
-        # reverse pass (mirrored):
-        #   norm(pose_gate) < gate_side
-        #   0 < x < 0.1
-        #   |y| < gate_side / 2
-        #   |z| < gate_side / 2
+        # Spatial window matches TA controller_simple_policy.py
+        # Add motion direction to avoid counting reverse traversal as pass
         # ------------------------------------------------------------------
         gate_side = 2.0 * gate_half_width
 
-        inside_gate = (torch.abs(curr_y) < gate_half_width) & (torch.abs(curr_z) < gate_half_height)
+        inside_gate = (torch.abs(curr_y) < (0.9*gate_half_width)) & (torch.abs(curr_z) < (0.9*gate_half_height))
         near_gate_center = curr_dist_to_gate < gate_side
 
+        # Same spatial window as TA controller
         forward_x_band = (curr_x < 0.0) & (curr_x > -0.1)
         reverse_x_band = (curr_x > 0.0) & (curr_x < 0.1)
 
-        gate_passed = near_gate_center & forward_x_band & inside_gate
-        reverse_gate_passed = near_gate_center & reverse_x_band & inside_gate
+        # Direction check:
+        # moving_forward  => desired pass direction
+        # moving_reverse  => opposite direction
+        moving_forward = vel_forward > 0.0
+        moving_reverse = vel_forward < 0.0
+
+        # Valid pass must satisfy BOTH:
+        #   1) same spatial gate window as TA controller
+        #   2) correct motion direction
+        gate_passed = near_gate_center & forward_x_band & inside_gate & moving_forward
+
+        # Reverse traversal is only for penalty, never for waypoint advance
+        reverse_gate_passed = near_gate_center & reverse_x_band & inside_gate & moving_reverse
 
         ids_gate_passed = torch.where(gate_passed)[0]
 
@@ -304,7 +308,9 @@ class DefaultQuadcopterStrategy:
                         f"curr_x={float(curr_x[env_id].item()):.4f} "
                         f"curr_y={float(curr_y[env_id].item()):.4f} "
                         f"curr_z={float(curr_z[env_id].item()):.4f} "
-                        f"dist={float(curr_dist_to_gate[env_id].item()):.4f}"
+                        f"dist={float(curr_dist_to_gate[env_id].item()):.4f} "
+                        f"vel_gate_x={float(drone_lin_vel_gate[env_id, 0].item()):.4f} "
+                        f"vel_forward={float(vel_forward[env_id].item()):.4f}"
                     )
 
             self.env._idx_wp[ids_gate_passed] = (

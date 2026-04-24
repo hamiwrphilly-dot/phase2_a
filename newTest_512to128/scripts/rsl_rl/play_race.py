@@ -27,7 +27,11 @@ if os.path.exists(local_rsl_path):
     print(f"[INFO] Using local rsl_rl from: {local_rsl_path}")
 else:
     print(f"[WARNING] Local rsl_rl not found at: {local_rsl_path}")
-    
+
+# Sanity check
+import src
+print(f"[INFO] src package loaded from: {src.__file__}")
+
 import argparse
 
 from isaaclab.app import AppLauncher
@@ -44,6 +48,22 @@ parser.add_argument("--num_envs", type=int, default=None, help="Number of enviro
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--follow_robot", type=int, default=-1, help="Follow robot index.")
 parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+parser.add_argument(
+    "--track",
+    type=str,
+    default="powerloop",
+    choices=["powerloop", "lemniscate", "complex"],
+    help="Track to use for play/evaluation.",
+)
+
+# new: camera view mode
+parser.add_argument(
+    "--view_mode",
+    type=str,
+    default="default",
+    choices=["default", "rot30", "rot-30"],
+    help="Camera view mode for video rendering.",
+)
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -79,7 +99,26 @@ from isaaclab_rl.rsl_rl import (
 )
 
 # Import extensions to set up environment tasks
-import src.isaac_quad_sim2real.tasks   # noqa: F401
+# import src.isaac_quad_sim2real.tasks   # noqa: F401
+import src.isaac_quad_sim2real.tasks as my_tasks   # noqa: F401
+print(f"[INFO] Task package loaded from: {my_tasks.__file__}")
+
+
+def rotate_eye_around_lookat(eye, lookat, angle_deg):
+    """Rotate camera eye position around lookat in the horizontal XY plane."""
+    angle = math.radians(angle_deg)
+
+    ex, ey, ez = eye
+    lx, ly, lz = lookat
+
+    dx = ex - lx
+    dy = ey - ly
+
+    new_dx = math.cos(angle) * dx - math.sin(angle) * dy
+    new_dy = math.sin(angle) * dx + math.cos(angle) * dy
+
+    return (lx + new_dx, ly + new_dy, ez)
+
 
 def main():
     """Play with RSL-RL agent."""
@@ -88,6 +127,8 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
+    # change task! change track
+    env_cfg.track_name = args_cli.track
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -98,8 +139,23 @@ def main():
 
     if args_cli.follow_robot == -1:
         env_cfg.viewer.resolution = (1920, 1080)
-        env_cfg.viewer.eye = (10.7, 0.4, 7.2)
-        env_cfg.viewer.lookat = (-2.7, 0.5, -0.3)
+
+        default_eye = (10.7, 0.4, 7.2)
+        default_lookat = (-2.7, 0.5, -0.3)
+
+        env_cfg.viewer.lookat = default_lookat
+
+        if args_cli.view_mode == "default":
+            env_cfg.viewer.eye = default_eye
+        elif args_cli.view_mode == "rot30":
+            env_cfg.viewer.eye = rotate_eye_around_lookat(default_eye, default_lookat, 30.0)
+        elif args_cli.view_mode == "rot-30":
+            env_cfg.viewer.eye = rotate_eye_around_lookat(default_eye, default_lookat, -30.0)
+
+        print(f"[INFO] Camera view mode: {args_cli.view_mode}")
+        print(f"[INFO] Camera eye: {env_cfg.viewer.eye}")
+        print(f"[INFO] Camera lookat: {env_cfg.viewer.lookat}")
+
     elif args_cli.follow_robot >= 0:
         env_cfg.viewer.eye = (-0.8, 0.8, 0.8)
         env_cfg.viewer.resolution = (1920, 1080)
@@ -153,24 +209,21 @@ def main():
 
     # reset environment
     obs = env.get_observations()
-    # Extract tensor from TensorDict for policy
     if hasattr(obs, "get"):  # Check if it's a TensorDict
         obs = obs["policy"]  # Extract the policy observation
+
     timestep = 0
+
     # simulate environment
     while simulation_app.is_running():
-        # run everything in inference mode
         with torch.inference_mode():
-            # agent stepping
             actions = policy(obs)
-            # env stepping
             obs, rewards, dones, infos = env.step(actions)
-            # Extract tensor from TensorDict for policy
             if hasattr(obs, "get"):  # Check if it's a TensorDict
                 obs = obs["policy"]  # Extract the policy observation
+
         if args_cli.video:
             timestep += 1
-            # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
 
@@ -179,7 +232,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # run the main function
     main()
-    # close sim app
     simulation_app.close()
